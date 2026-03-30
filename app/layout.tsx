@@ -1,20 +1,24 @@
-import { Geist, Geist_Mono, Noto_Serif } from "next/font/google"
+import type { Metadata } from "next"
+import { Inter, JetBrains_Mono } from "next/font/google"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-const notoSerif = Noto_Serif({subsets:['latin'],variable:'--font-serif'});
-
-const fontSans = Geist({
+const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
 })
 
-const fontMono = Geist_Mono({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
 })
+
+export const metadata: Metadata = {
+  title: "LegalIntel — AI-Powered Case Intelligence",
+  description: "Agentic legal document analysis and case management",
+}
 
 export default function RootLayout({
   children,
@@ -25,10 +29,10 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased", fontSans.variable, fontMono.variable, "font-serif", notoSerif.variable)}
+      className={cn("antialiased", inter.variable, jetbrainsMono.variable)}
     >
-      <body>
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="font-sans">
+        <ThemeProvider defaultTheme="dark">{children}</ThemeProvider>
       </body>
     </html>
   )

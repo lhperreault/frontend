@@ -4,6 +4,62 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Case summary markdown renderer ────────────────────────────────────────── */
+.summary-md { font-size: 0.8125rem; line-height: 1.6; }
+
+.summary-md h1, .summary-md h2 {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+.summary-md h2:first-child { margin-top: 0; }
+
+.summary-md p    { margin: 0.3rem 0; }
+.summary-md em   { font-style: italic; opacity: 0.8; }
+.summary-md strong { font-weight: 600; }
+
+.summary-md ul, .summary-md ol {
+  margin: 0.3rem 0 0.3rem 1.1rem;
+  padding: 0;
+}
+.summary-md li { margin: 0.15rem 0; }
+
+.summary-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin: 0.4rem 0;
+}
+.summary-md th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+.summary-md td {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  vertical-align: top;
+}
+
+.summary-md hr {
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  margin: 0.75rem 0;
+}
+
+.summary-md code {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
 @theme inline {
     --font-heading: var(--font-serif);
     --font-serif: var(--font-serif);
@@ -116,14 +172,66 @@
     --sidebar-ring: oklch(0.547 0.021 43.1);
 }
 
+/* ── Extraction confidence glow colors ───────────────────── */
+:root {
+  --glow-verified:     oklch(0.72 0.18 142);   /* green  — confirmed fact */
+  --glow-unverified:   oklch(0.78 0.18  75);   /* amber  — extracted, awaiting HITL */
+  --glow-contradicts:  oklch(0.65 0.22  27);   /* red    — conflicts other evidence */
+  --glow-low-conf:     oklch(0.60 0.04 260);   /* muted  — confidence < 0.7 */
+
+  --glass-bg:          oklch(1 0 0 / 6%);
+  --glass-border:      oklch(1 0 0 / 12%);
+  --glass-blur:        12px;
+}
+
+.dark {
+  --glass-bg:          oklch(0 0 0 / 25%);
+  --glass-border:      oklch(1 0 0 / 8%);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
   html {
-    @apply font-serif;
-    }
+    @apply font-sans;
+  }
+}
+
+/* ── Glassmorphism utility ───────────────────────────────── */
+@layer utilities {
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+
+  .glow-verified {
+    box-shadow: 0 0 0 2px var(--glow-verified), 0 0 12px var(--glow-verified);
+    background: oklch(from var(--glow-verified) l c h / 8%);
+  }
+  .glow-unverified {
+    box-shadow: 0 0 0 2px var(--glow-unverified), 0 0 12px var(--glow-unverified);
+    background: oklch(from var(--glow-unverified) l c h / 8%);
+  }
+  .glow-contradicts {
+    box-shadow: 0 0 0 2px var(--glow-contradicts), 0 0 12px var(--glow-contradicts);
+    background: oklch(from var(--glow-contradicts) l c h / 8%);
+  }
+  .glow-low-conf {
+    outline: 1px dashed var(--glow-low-conf);
+    background: oklch(from var(--glow-low-conf) l c h / 5%);
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }
