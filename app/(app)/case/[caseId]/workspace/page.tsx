@@ -1,7 +1,6 @@
 import { createServerClient } from "@/lib/supabase/server"
-import { PanelLayout } from "@/components/shell/panel-layout"
-import { ChronologyDrawer } from "@/components/chronology/chronology-drawer"
-import { WorkspaceCenter } from "@/components/lightbox/workspace-center"
+import { WorkspaceProvider } from "@/providers/workspace-provider"
+import { FlexibleWorkspace } from "@/components/workspace/flexible-workspace"
 
 export default async function WorkspacePage({
   params,
@@ -28,16 +27,10 @@ export default async function WorkspacePage({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex-1 overflow-hidden">
-        <PanelLayout
-          caseId={caseId}
-          centerContent={
-            <WorkspaceCenter caseId={caseId} initialDocumentId={documentId} />
-          }
-        />
+    <WorkspaceProvider caseId={caseId} initialDocumentId={documentId}>
+      <div className="flex h-full flex-col overflow-hidden">
+        <FlexibleWorkspace caseId={caseId} />
       </div>
-      <ChronologyDrawer caseId={caseId} />
-    </div>
+    </WorkspaceProvider>
   )
 }

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 
 interface CaseNavBarProps {
   caseId: string
+  rightSlot?: React.ReactNode
 }
 
 const TABS = [
@@ -18,7 +19,7 @@ const TABS = [
   { label: "Review",    segment: "review"    },
 ] as const
 
-export function CaseNavBar({ caseId }: CaseNavBarProps) {
+export function CaseNavBar({ caseId, rightSlot }: CaseNavBarProps) {
   const pathname = usePathname()
 
   return (
@@ -44,6 +45,11 @@ export function CaseNavBar({ caseId }: CaseNavBarProps) {
           </Link>
         )
       })}
+      {rightSlot && (
+        <div className="ml-auto shrink-0 pl-2">
+          {rightSlot}
+        </div>
+      )}
     </nav>
   )
 }
