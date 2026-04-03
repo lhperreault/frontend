@@ -20,18 +20,39 @@ export async function GET(
   return NextResponse.json(data)
 }
 
+const _EDITABLE_FIELDS = [
+  "case_name",
+  "case_type",
+  "case_stage",
+  "party_role",
+  "our_client",
+  "opposing_party",
+  "court_name",
+  "judge_name",
+  "case_context",
+] as const
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ caseId: string }> },
 ) {
   const { caseId } = await params
   const body = await request.json()
-  const { case_stage } = body
+
+  // Only allow known editable fields — strip anything else
+  const updates: Record<string, string | null> = {}
+  for (const field of _EDITABLE_FIELDS) {
+    if (field in body) updates[field] = body[field] ?? null
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No valid fields to update" }, { status: 400 })
+  }
 
   const supabase = createServerClient()
   const { data, error } = await supabase
     .from("cases")
-    .update({ case_stage })
+    .update(updates)
     .eq("id", caseId)
     .select()
     .single()

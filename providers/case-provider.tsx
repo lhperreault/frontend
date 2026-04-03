@@ -10,6 +10,7 @@ interface CaseContextValue extends Partial<Case> {
   caseId: string
   activePhase: Phase
   isLoading: boolean
+  refreshCase: () => void
 }
 
 interface PhaseContextValue {
@@ -35,6 +36,7 @@ export function CaseProvider({
   const [phase, setPhaseState] = useState<Phase>(urlPhase)
   const [caseData, setCaseData] = useState<Case | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [tick, setTick] = useState(0)
 
   const setPhase = useCallback((p: Phase) => {
     setPhaseState(p)
@@ -52,12 +54,15 @@ export function CaseProvider({
       .then((data) => { if (data) setCaseData(data) })
       .catch(() => {})
       .finally(() => setIsLoading(false))
-  }, [caseId])
+  }, [caseId, tick])
+
+  const refreshCase = useCallback(() => setTick((t) => t + 1), [])
 
   const caseCtx: CaseContextValue = {
     caseId,
     activePhase: phase,
     isLoading,
+    refreshCase,
     ...(caseData ?? {}),
   }
 

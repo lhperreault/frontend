@@ -1,11 +1,142 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
+import { Pencil, Check, X, Loader2 } from "lucide-react"
 import { useCase } from "@/providers/case-provider"
 import { useWorkspace } from "@/providers/workspace-provider"
 import { useEntities } from "@/hooks/use-entities"
 import { useDocument } from "@/hooks/use-document"
 import { cn } from "@/lib/utils"
+
+// ─── Editable info row ────────────────────────────────────────────────────────
+
+function EditableInfoRow({
+  label,
+  field,
+  value,
+  caseId,
+  onSaved,
+  capitalize = false,
+  inputType = "text",
+  options,
+}: {
+  label: string
+  field: string
+  value: string | null | undefined
+  caseId: string
+  onSaved: () => void
+  capitalize?: boolean
+  inputType?: "text" | "select"
+  options?: { value: string; label: string }[]
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState("")
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const startEdit = () => {
+    setDraft(value ?? "")
+    setError(null)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const cancel = () => {
+    setEditing(false)
+    setError(null)
+  }
+
+  const save = useCallback(async () => {
+    const trimmed = draft.trim()
+    if (trimmed === (value ?? "")) { cancel(); return }
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/case/${caseId}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: trimmed || null }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      setEditing(false)
+      onSaved()
+    } catch {
+      setError("Failed to save")
+    } finally {
+      setSaving(false)
+    }
+  }, [caseId, draft, field, onSaved, value])
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1 py-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-16 shrink-0 text-[10px] text-muted-foreground">{label}</span>
+          {inputType === "select" && options ? (
+            <select
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              className="flex-1 rounded border border-primary/40 bg-background px-1.5 py-0.5 text-xs outline-none focus:ring-1 focus:ring-primary/30"
+            >
+              <option value="">— unset —</option>
+              {options.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") cancel() }}
+              className="flex-1 rounded border border-primary/40 bg-background px-1.5 py-0.5 text-xs outline-none focus:ring-1 focus:ring-primary/30"
+              placeholder={`Enter ${label.toLowerCase()}…`}
+            />
+          )}
+          <button
+            onClick={save}
+            disabled={saving}
+            className="rounded p-0.5 text-emerald-500 hover:bg-emerald-500/10 disabled:opacity-40"
+          >
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+          </button>
+          <button
+            onClick={cancel}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted/30"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+        {error && <p className="pl-[4.5rem] text-[10px] text-red-400">{error}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="group flex items-center gap-2 rounded px-0.5 py-0.5 hover:bg-muted/20"
+    >
+      <span className="w-16 shrink-0 text-[10px] text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          "flex-1 text-xs",
+          capitalize && "capitalize",
+          !value && "italic text-muted-foreground/40",
+        )}
+      >
+        {value || "—"}
+      </span>
+      <button
+        onClick={startEdit}
+        title={`Edit ${label.toLowerCase()}`}
+        className="invisible rounded p-0.5 text-muted-foreground/40 hover:text-muted-foreground group-hover:visible"
+      >
+        <Pencil className="h-2.5 w-2.5" />
+      </button>
+    </div>
+  )
+}
 
 // ─── Case-level summary ───────────────────────────────────────────────────────
 
@@ -27,22 +158,43 @@ function CaseSummary({ caseId }: { caseId: string }) {
     )
   }
 
+  const editProps = { caseId, onSaved: caseCtx?.refreshCase ?? (() => {}) }
+
   return (
     <div className="space-y-5 p-4">
       {/* Case identity */}
       <section>
         <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Case Info
+          <span className="ml-1.5 normal-case font-normal text-muted-foreground/50">(hover to edit)</span>
         </h2>
-        <div className="space-y-1.5 rounded-xl border border-border/30 bg-muted/10 p-3">
-          <InfoRow label="Case" value={caseCtx?.case_name} />
-          <InfoRow label="Type" value={caseCtx?.case_type} />
-          <InfoRow label="Stage" value={caseCtx?.case_stage} capitalize />
-          <InfoRow label="Role" value={caseCtx?.party_role} capitalize />
-          <InfoRow label="Client" value={caseCtx?.our_client} />
-          <InfoRow label="Opposing" value={caseCtx?.opposing_party} />
-          <InfoRow label="Court" value={caseCtx?.court_name} />
-          <InfoRow label="Judge" value={caseCtx?.judge_name} />
+        <div className="space-y-0.5 rounded-xl border border-border/30 bg-muted/10 p-3">
+          <EditableInfoRow label="Case"     field="case_name"      value={caseCtx?.case_name}      {...editProps} />
+          <EditableInfoRow label="Type"     field="case_type"      value={caseCtx?.case_type}      {...editProps} />
+          <EditableInfoRow label="Stage"    field="case_stage"     value={caseCtx?.case_stage}     {...editProps}
+            capitalize inputType="select"
+            options={[
+              { value: "filing",    label: "Filing" },
+              { value: "discovery", label: "Discovery" },
+              { value: "motions",   label: "Motions" },
+              { value: "trial",     label: "Trial" },
+              { value: "appeal",    label: "Appeal" },
+              { value: "closed",    label: "Closed" },
+            ]}
+          />
+          <EditableInfoRow label="Role"     field="party_role"     value={caseCtx?.party_role}     {...editProps}
+            capitalize inputType="select"
+            options={[
+              { value: "plaintiff", label: "Plaintiff" },
+              { value: "defendant", label: "Defendant" },
+              { value: "appellant", label: "Appellant" },
+              { value: "appellee",  label: "Appellee" },
+            ]}
+          />
+          <EditableInfoRow label="Client"   field="our_client"     value={caseCtx?.our_client}     {...editProps} />
+          <EditableInfoRow label="Opposing" field="opposing_party" value={caseCtx?.opposing_party} {...editProps} />
+          <EditableInfoRow label="Court"    field="court_name"     value={caseCtx?.court_name}     {...editProps} />
+          <EditableInfoRow label="Judge"    field="judge_name"     value={caseCtx?.judge_name}     {...editProps} />
           {caseCtx?.next_deadline && (
             <InfoRow
               label="Deadline"

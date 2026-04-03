@@ -1,7 +1,10 @@
 "use client"
 
-import { useState } from "react"
-import { ChevronLeft, ChevronRight, ExternalLink, AlertCircle, CheckCircle2, HelpCircle } from "lucide-react"
+import { useState, useRef } from "react"
+import {
+  ChevronLeft, ChevronRight, ExternalLink, AlertCircle,
+  CheckCircle2, HelpCircle, Pencil, Trash2, X, Check, Loader2,
+} from "lucide-react"
 import { useCounts } from "@/hooks/use-counts"
 import { useWorkspace } from "@/providers/workspace-provider"
 import { Badge } from "@/components/ui/badge"
@@ -86,7 +89,6 @@ function ElementRow({
         onClick={() => setExpanded(v => !v)}
         className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
       >
-        {/* Status icon */}
         {resolvedLinks.length > 0 ? (
           <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
         ) : hasEvidence ? (
@@ -180,31 +182,177 @@ function AllegationRow({
 function CountDetail({
   count,
   onNavigate,
+  onUpdate,
+  onDismiss,
 }: {
   count: CountWithEvidence
   onNavigate: (docId: string, sectionId?: string) => void
+  onUpdate: (countId: string, edits: { count_label?: string; count_type?: string | null; summary?: string | null }) => Promise<void>
+  onDismiss: (countId: string) => Promise<void>
 }) {
-  const totalElements = count.elements.length
+  const totalElements    = count.elements.length
   const supportedElements = count.elements.filter(e =>
     e.evidence_links.some(l => !!l.evidence_document_id)
   ).length
   const gapCount = totalElements - supportedElements
 
+  // Edit state
+  const [editing, setEditing]           = useState(false)
+  const [editLabel, setEditLabel]       = useState(count.count_label)
+  const [editType, setEditType]         = useState(count.count_type ?? "")
+  const [editSummary, setEditSummary]   = useState(count.summary ?? "")
+  const [saving, setSaving]             = useState(false)
+  const [saveError, setSaveError]       = useState<string | null>(null)
+
+  // Dismiss state
+  const [confirmDismiss, setConfirmDismiss] = useState(false)
+  const [dismissing, setDismissing]         = useState(false)
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const startEdit = () => {
+    setEditLabel(count.count_label)
+    setEditType(count.count_type ?? "")
+    setEditSummary(count.summary ?? "")
+    setSaveError(null)
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setSaveError(null)
+  }
+
+  const saveEdit = async () => {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await onUpdate(count.id, {
+        count_label: editLabel.trim() || count.count_label,
+        count_type:  editType.trim() || null,
+        summary:     editSummary.trim() || null,
+      })
+      setEditing(false)
+    } catch {
+      setSaveError("Failed to save — please try again.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDismissClick = () => {
+    if (!confirmDismiss) {
+      setConfirmDismiss(true)
+      // Auto-cancel confirm after 4 s
+      dismissTimerRef.current = setTimeout(() => setConfirmDismiss(false), 4000)
+      return
+    }
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current)
+    setDismissing(true)
+    onDismiss(count.id).catch(() => {
+      setDismissing(false)
+      setConfirmDismiss(false)
+    })
+  }
+
   return (
     <div className="space-y-4 p-4">
       {/* Count header */}
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">{count.count_label}</h2>
-          {count.count_type && (
-            <Badge variant="secondary" className="text-[10px]">{count.count_type}</Badge>
+        <div className="flex flex-wrap items-start gap-2">
+          {editing ? (
+            <div className="flex flex-1 flex-col gap-2">
+              {/* Label */}
+              <input
+                autoFocus
+                value={editLabel}
+                onChange={e => setEditLabel(e.target.value)}
+                className="w-full rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                placeholder="Count label"
+              />
+              {/* Type */}
+              <input
+                value={editType}
+                onChange={e => setEditType(e.target.value)}
+                className="w-full rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                placeholder="Count type (e.g. breach_of_contract)"
+              />
+              {/* Summary */}
+              <textarea
+                value={editSummary}
+                onChange={e => setEditSummary(e.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                placeholder="Summary (optional)"
+              />
+              {saveError && (
+                <p className="text-[10px] text-red-400">{saveError}</p>
+              )}
+              {/* Save / Cancel */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={saveEdit}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 rounded-md border border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30"
+                >
+                  <X className="h-3 w-3" />
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h2 className="flex-1 text-sm font-semibold">{count.count_label}</h2>
+              {count.count_type && (
+                <Badge variant="secondary" className="text-[10px]">{count.count_type}</Badge>
+              )}
+              {/* Edit button */}
+              <button
+                type="button"
+                onClick={startEdit}
+                title="Edit this count"
+                className="rounded p-1 text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-muted-foreground"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              {/* Dismiss button */}
+              <button
+                type="button"
+                onClick={handleDismissClick}
+                disabled={dismissing}
+                title={confirmDismiss ? "Click again to confirm removal" : "Remove this count"}
+                className={cn(
+                  "flex items-center gap-1 rounded px-1.5 py-1 text-[10px] font-medium transition-colors",
+                  confirmDismiss
+                    ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                    : "text-muted-foreground/40 hover:bg-muted/30 hover:text-muted-foreground"
+                )}
+              >
+                {dismissing
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Trash2 className="h-3.5 w-3.5" />
+                }
+                {confirmDismiss && <span>Confirm remove</span>}
+              </button>
+            </>
           )}
         </div>
-        {count.summary && (
+
+        {!editing && count.summary && (
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{count.summary}</p>
         )}
+
         {/* Source navigation */}
-        {count.document_id && (
+        {!editing && count.document_id && (
           <button
             type="button"
             onClick={() => onNavigate(count.document_id!, count.section_id ?? undefined)}
@@ -279,7 +427,7 @@ function CountDetail({
         </section>
       )}
 
-      {/* Evidence gaps summary */}
+      {/* Evidence gaps */}
       {gapCount > 0 && (
         <section>
           <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -297,18 +445,25 @@ function CountDetail({
 // ─── ClaimsCountsView ─────────────────────────────────────────────────────────
 
 export function ClaimsCountsView({ caseId }: { caseId: string }) {
-  const { counts, isLoading, error } = useCounts(caseId)
+  const { counts, isLoading, error, updateCount, dismissCount } = useCounts(caseId)
   const { navigateToDocument } = useWorkspace()
   const [activeIndex, setActiveIndex] = useState(0)
 
-  const total = counts.length
-  const current = counts[activeIndex] ?? null
+  const total   = counts.length
+  const safeIdx = Math.min(activeIndex, Math.max(0, total - 1))
+  const current = counts[safeIdx] ?? null
 
   const prev = () => setActiveIndex(i => Math.max(0, i - 1))
   const next = () => setActiveIndex(i => Math.min(total - 1, i + 1))
 
   const handleNavigate = (docId: string, sectionId?: string) => {
     navigateToDocument(docId, sectionId)
+  }
+
+  const handleDismiss = async (countId: string) => {
+    await dismissCount(countId)
+    // After removal the list shrinks — clamp index
+    setActiveIndex(i => Math.max(0, Math.min(i, total - 2)))
   }
 
   if (isLoading) {
@@ -349,7 +504,7 @@ export function ClaimsCountsView({ caseId }: { caseId: string }) {
           <button
             type="button"
             onClick={prev}
-            disabled={activeIndex === 0}
+            disabled={safeIdx === 0}
             className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/30 disabled:opacity-30"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -369,7 +524,7 @@ export function ClaimsCountsView({ caseId }: { caseId: string }) {
                   onClick={() => setActiveIndex(i)}
                   className={cn(
                     "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors",
-                    i === activeIndex
+                    i === safeIdx
                       ? "bg-primary text-primary-foreground"
                       : hasGaps
                         ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
@@ -385,21 +540,29 @@ export function ClaimsCountsView({ caseId }: { caseId: string }) {
           <button
             type="button"
             onClick={next}
-            disabled={activeIndex === total - 1}
+            disabled={safeIdx === total - 1}
             className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/30 disabled:opacity-30"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
 
           <span className="shrink-0 text-[10px] text-muted-foreground">
-            {activeIndex + 1} / {total}
+            {safeIdx + 1} / {total}
           </span>
         </div>
       </div>
 
       {/* Count detail */}
       <div className="flex-1 overflow-y-auto scrollbar-none">
-        {current && <CountDetail count={current} onNavigate={handleNavigate} />}
+        {current && (
+          <CountDetail
+            key={current.id}
+            count={current}
+            onNavigate={handleNavigate}
+            onUpdate={updateCount}
+            onDismiss={handleDismiss}
+          />
+        )}
       </div>
     </div>
   )
