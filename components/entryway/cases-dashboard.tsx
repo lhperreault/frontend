@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useMemo } from "react"
 import Link from "next/link"
 import { Plus, Search, Trash2, Upload, ChevronDown, ChevronUp } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
 import { OmniDropZone } from "./omni-drop-zone"
 import { InboundStream } from "./inbound-stream"
 import { NewCaseModal } from "./new-case-modal"
@@ -72,26 +71,11 @@ export function CasesDashboard() {
   const deleteInputRef = useRef<HTMLInputElement>(null)
 
   async function load() {
-    const supabase = createClient()
-    const { data: caseRows } = await supabase
-      .from("cases")
-      .select("*")
-      .order("created_at", { ascending: false })
-
-    if (!caseRows?.length) { setIsLoading(false); return }
-    setCases(caseRows as Case[])
-
-    const ids = caseRows.map((c) => c.id)
-    const { data: docs } = await supabase
-      .from("documents")
-      .select("case_id")
-      .in("case_id", ids)
-
-    const counts: Record<string, number> = {}
-    for (const d of docs ?? []) {
-      counts[d.case_id] = (counts[d.case_id] ?? 0) + 1
-    }
-    setDocCounts(counts)
+    const res = await fetch("/api/cases")
+    if (!res.ok) { setIsLoading(false); return }
+    const { cases: caseRows, docCounts: counts } = await res.json()
+    setCases((caseRows ?? []) as Case[])
+    setDocCounts(counts ?? {})
     setIsLoading(false)
   }
 
@@ -121,8 +105,13 @@ export function CasesDashboard() {
   async function confirmDelete() {
     if (!deleteTarget || deleteInput !== deleteTarget.case_name) return
     setIsDeleting(true)
-    await createClient().from("cases").delete().eq("id", deleteTarget.id)
-    setCases((prev) => prev.filter((c) => c.id !== deleteTarget.id))
+    const res = await fetch(`/api/case/${deleteTarget.id}`, { method: "DELETE" })
+    if (res.ok) {
+      setCases((prev) => prev.filter((c) => c.id !== deleteTarget.id))
+    } else {
+      const body = await res.json().catch(() => ({}))
+      console.error("[CasesDashboard] delete failed:", body)
+    }
     setIsDeleting(false)
     closeDeleteModal()
   }
@@ -239,9 +228,8 @@ export function CasesDashboard() {
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((c) => {
-              const dotCls   = STATUS_DOT[c.pipeline_status ?? "idle"] ?? STATUS_DOT.idle
-              const stageCls = c.case_stage ? (STAGE_STYLE[c.case_stage] ?? "") : ""
-              const count    = docCounts[c.id] ?? 0
+              const dotCls = STATUS_DOT[c.pipeline_status ?? "idle"] ?? STATUS_DOT.idle
+              const count  = docCounts[c.id] ?? 0
 
               return (
                 <Link
@@ -251,9 +239,24 @@ export function CasesDashboard() {
                 >
                   {/* Name + status dot + delete */}
                   <div className="flex items-start justify-between gap-2">
-                    <span className="truncate text-sm font-medium group-hover:text-primary">
-                      {c.case_name}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm font-medium group-hover:text-primary">
+                        {c.case_name}
+                      </span>
+                      {/* Case type + party role — purple, right under the name */}
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {c.case_stage && (
+                          <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-medium capitalize text-purple-400">
+                            {c.case_stage}
+                          </span>
+                        )}
+                        {c.party_role && (
+                          <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium capitalize text-purple-300">
+                            {ROLE_LABEL[c.party_role] ?? c.party_role}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <span
                         className={`mt-1 h-2 w-2 rounded-full ${dotCls}`}
@@ -270,24 +273,14 @@ export function CasesDashboard() {
                     </div>
                   </div>
 
-                  {/* Stage + role badges */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {c.case_stage && (
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize ${stageCls}`}>
-                        {c.case_stage}
-                      </span>
-                    )}
-                    {c.party_role && (
-                      <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {ROLE_LABEL[c.party_role] ?? c.party_role}
-                      </span>
-                    )}
-                    {c.opposing_party && (
-                      <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground/70 truncate max-w-[120px]">
+                  {/* Opposing party */}
+                  {c.opposing_party && (
+                    <div className="flex items-center">
+                      <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground/70 truncate max-w-[160px]">
                         v. {c.opposing_party}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Footer */}
                   <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">

@@ -19,3 +19,25 @@ export async function GET(
   }
   return NextResponse.json(data)
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ caseId: string }> },
+) {
+  const { caseId } = await params
+  const body = await request.json()
+  const { case_stage } = body
+
+  const supabase = createServerClient()
+  const { data, error } = await supabase
+    .from("cases")
+    .update({ case_stage })
+    .eq("id", caseId)
+    .select()
+    .single()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  return NextResponse.json(data)
+}

@@ -16,7 +16,7 @@ export function DocumentView({ caseId }: { caseId: string }) {
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Document[]) => setDocuments(data))
       .catch(() => {})
-  }, [caseId])
+  }, [caseId, activeDocumentId])
 
   const handleSwitch = (docId: string) => {
     navigateToDocument(docId)

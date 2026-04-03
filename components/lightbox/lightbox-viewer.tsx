@@ -1,9 +1,10 @@
 "use client"
 
-import { useRef, useState, useEffect } from "react"
+import { useRef, useState, useEffect, useMemo } from "react"
 import { useDocument } from "@/hooks/use-document"
 import { useDocumentXhtml } from "@/hooks/use-document-xhtml"
 import { useEntities } from "@/hooks/use-entities"
+import { useWorkspace } from "@/providers/workspace-provider"
 import { DocumentNav } from "./document-nav"
 import { DocumentHighlighter } from "./document-highlighter"
 import { EntityHighlighter } from "./entity-highlighter"
@@ -32,6 +33,7 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
   const contentRef = useRef<HTMLDivElement>(null)
   const [activeSectionId, setActiveSectionId] = useState<string | undefined>()
   const [showNav, setShowNav] = useState(true)
+  const { highlightedSectionIds } = useWorkspace()
 
   const { document, sections, extractions, isLoading } = useDocument(documentId)
   const { entities } = useEntities(caseId)
@@ -42,6 +44,19 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
   const { xhtml, isLoading: xhtmlLoading } = useDocumentXhtml(xhtmlProxyUrl)
 
   const loading = isLoading || xhtmlLoading
+
+  // If a Title Page section exists among root sections, move it to the front
+  const sortedSections = useMemo(() => {
+    if (!sections.length) return sections
+    const titleIdx = sections.findIndex(
+      (s) => !s.parent_section_id && /title\s*page/i.test(s.section_title ?? ""),
+    )
+    if (titleIdx <= 0) return sections
+    const result = [...sections]
+    const [titlePage] = result.splice(titleIdx, 1)
+    result.unshift(titlePage)
+    return result
+  }, [sections])
 
   // Auto-scroll to scrollToSectionId once loading finishes
   useEffect(() => {
@@ -55,7 +70,7 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
 
     // XHTML mode: look up anchor_id from sections, then find #anchorId
     if (!el && xhtml) {
-      const sec = sections.find((s) => s.id === scrollToSectionId)
+      const sec = sortedSections.find((s) => s.id === scrollToSectionId)
       if (sec?.anchor_id) {
         el = container.querySelector(`#${sec.anchor_id}`) as HTMLElement | null
       }
@@ -65,7 +80,7 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
       setActiveSectionId(scrollToSectionId)
       el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
-  }, [loading, scrollToSectionId, sections, xhtml])
+  }, [loading, scrollToSectionId, sortedSections, xhtml])
 
   const handleNavSelect = (sectionId: string, anchorId?: string | null) => {
     setActiveSectionId(sectionId)
@@ -89,11 +104,12 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
       )}
     >
       {/* Collapsible TOC sidebar */}
-      {showNav && sections.length > 0 && (
+      {showNav && sortedSections.length > 0 && (
         <div className="w-48 shrink-0 border-r border-slate-200 overflow-hidden">
           <DocumentNav
-            sections={sections}
+            sections={sortedSections}
             activeSectionId={activeSectionId}
+            highlightedSectionIds={highlightedSectionIds}
             onSelect={handleNavSelect}
             onToggle={() => setShowNav(false)}
           />
@@ -138,12 +154,12 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
           ) : (
             // Non-HTML documents: render section blocks
             <div className="px-12 py-8 max-w-4xl mx-auto font-[Inter,system-ui,sans-serif]">
-              {sections.length === 0 && (
+              {sortedSections.length === 0 && (
                 <p className="text-slate-400 text-sm italic">
                   No content available for this document.
                 </p>
               )}
-              {sections.map((section) => {
+              {sortedSections.map((section) => {
                 // Strip pipeline annotation lines e.g. "[Split into N sub-sections by script.py]"
                 const cleanText = (section.section_text ?? "")
                   .split("\n")

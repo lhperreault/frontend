@@ -15,6 +15,8 @@ export interface ChatState {
   isLoading: boolean
   isSummaryLoading: boolean
   handleSubmit: (e: React.FormEvent) => void
+  resetChat: () => void
+  sessionId: string
 }
 
 /**
@@ -26,10 +28,24 @@ export interface ChatState {
  * pre-populated with a professional case briefing.
  */
 export function useChatMessages(caseId: string): ChatState {
-  const { send, isLoading } = useAgentQuery(caseId)
+  const { send, isLoading, sessionId, newSession } = useAgentQuery(caseId)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [isSummaryLoading, setIsSummaryLoading] = useState(true)
+
+  const loadSummary = useCallback(() => {
+    setMessages([])
+    setIsSummaryLoading(true)
+    fetch(`/api/case/${caseId}/summary`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.answer) {
+          setMessages([{ type: "assistant", response: data, isSummary: true }])
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsSummaryLoading(false))
+  }, [caseId])
 
   // Load the document summary as the opening message
   useEffect(() => {
@@ -52,6 +68,12 @@ export function useChatMessages(caseId: string): ChatState {
     return () => { cancelled = true }
   }, [caseId])
 
+  const resetChat = useCallback(() => {
+    setInput("")
+    newSession()   // generates a new session_id and clears agent history
+    loadSummary()
+  }, [loadSummary, newSession])
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
@@ -67,5 +89,5 @@ export function useChatMessages(caseId: string): ChatState {
     [input, isLoading, send],
   )
 
-  return { messages, input, setInput, isLoading, isSummaryLoading, handleSubmit }
+  return { messages, input, setInput, isLoading, isSummaryLoading, handleSubmit, resetChat, sessionId }
 }

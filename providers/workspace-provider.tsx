@@ -32,6 +32,7 @@ interface WorkspaceContextValue {
   // Active document
   activeDocumentId: string | null
   navigateToDocument: (documentId: string, sectionId?: string) => void
+  clearActiveDocument: () => void
 
   // Cross-panel scroll target (drives the Document view)
   scrollTarget: ScrollTarget | null
@@ -41,6 +42,14 @@ interface WorkspaceContextValue {
   // Entity context (selected entity in Filter view → context chip in Chat)
   entityHoverTarget: EntityTarget | null
   setEntityHoverTarget: (entity: EntityTarget | null) => void
+
+  // Entity doc filter (selected entity in Filter view → filters AllDocumentsView)
+  entityDocFilter: EntityTarget | null
+  setEntityDocFilter: (entity: EntityTarget | null) => void
+
+  // Highlighted sections (driven by AI response provenance — shows green glow in TOC)
+  highlightedSectionIds: string[]
+  setHighlightedSections: (ids: string[]) => void
 
   // Toast notifications (e.g. "open a Document view first")
   toast: string | null
@@ -99,6 +108,8 @@ export function WorkspaceProvider({
   )
   const [scrollTarget, setScrollTarget] = useState<ScrollTarget | null>(null)
   const [entityHoverTarget, setEntityHoverTarget] = useState<EntityTarget | null>(null)
+  const [entityDocFilter,   setEntityDocFilter]   = useState<EntityTarget | null>(null)
+  const [highlightedSectionIds, setHighlightedSections] = useState<string[]>([])
   const [toast, setToast] = useState<string | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -179,6 +190,14 @@ export function WorkspaceProvider({
     [router, searchParams]
   )
 
+  const clearActiveDocument = useCallback(() => {
+    setActiveDocumentId(null)
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("doc")
+    params.delete("section")
+    router.replace(`?${params.toString()}`, { scroll: false })
+  }, [router, searchParams])
+
   const navigateToSection = useCallback(
     (sectionId: string, anchorId?: string) => {
       // Guard: if no Document view is open, show a toast instead of silently failing
@@ -208,11 +227,16 @@ export function WorkspaceProvider({
         setSlotWidth,
         activeDocumentId,
         navigateToDocument,
+        clearActiveDocument,
         scrollTarget,
         navigateToSection,
         clearScrollTarget,
         entityHoverTarget,
         setEntityHoverTarget,
+        entityDocFilter,
+        setEntityDocFilter,
+        highlightedSectionIds,
+        setHighlightedSections,
         toast,
         clearToast,
         caseId,

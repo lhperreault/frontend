@@ -1,5 +1,6 @@
 export interface ProvenanceLink {
   section_id: string
+  document_id?: string | null
   file_name: string
   document_type: string | null
   page_range: string | null

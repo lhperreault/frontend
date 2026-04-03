@@ -5,7 +5,6 @@ import Link from "next/link"
 import type { Document } from "@/lib/types/case"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { createClient } from "@/lib/supabase/client"
 
 interface DocumentsTableProps {
   documents: Document[]
@@ -60,9 +59,10 @@ function DocRow({ doc, children, caseId, isChild = false, onDeleted }: DocRowPro
 
   async function handleDelete() {
     setDeleting(true)
-    const { error } = await createClient().from("documents").delete().eq("id", doc.id)
-    if (error) {
-      console.error("[DocumentsTable] delete failed:", error)
+    const res = await fetch(`/api/case/${caseId}/documents/${doc.id}`, { method: "DELETE" })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      console.error("[DocumentsTable] delete failed:", body)
       setDeleting(false)
       setConfirm(false)
       return

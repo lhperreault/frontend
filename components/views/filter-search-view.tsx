@@ -14,7 +14,7 @@ import { ENTITY_TYPE_CONFIG } from "@/lib/constants/entity-types"
 const ALL_TYPES = new Set(Object.keys(ENTITY_TYPE_CONFIG) as NodeType[])
 
 export function FilterSearchView({ caseId }: { caseId: string }) {
-  const { activeDocumentId, setEntityHoverTarget } = useWorkspace()
+  const { activeDocumentId, setEntityHoverTarget, entityDocFilter, setEntityDocFilter } = useWorkspace()
   const { setHoverTarget, clearHoverTarget } = useHoverSync()
 
   const { entities, isLoading, error } = useEntities(caseId)
@@ -51,6 +51,9 @@ export function FilterSearchView({ caseId }: { caseId: string }) {
     if (sectionId) setHoverTarget(sectionId)
     // Entity context: expose to AI Chat so user can include it in their next message
     setEntityHoverTarget({ id: node.id, label: node.node_label, nodeType: node.node_type })
+    // Doc filter: toggle — clicking the same entity again clears the filter
+    const target = { id: node.id, label: node.node_label, nodeType: node.node_type }
+    setEntityDocFilter(entityDocFilter?.id === node.id ? null : target)
   }
 
   const handleMouseLeave = () => {
@@ -118,6 +121,21 @@ export function FilterSearchView({ caseId }: { caseId: string }) {
           </div>
         )}
       </div>
+
+      {entityDocFilter && (
+        <div className="flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1">
+          <span className="text-[10px] text-amber-400">
+            Filtering docs by: <span className="font-medium">{entityDocFilter.label}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setEntityDocFilter(null)}
+            className="ml-2 text-[10px] text-amber-400/70 hover:text-amber-400"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <EntityFilter
         activeTypes={activeTypes}

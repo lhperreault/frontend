@@ -4,14 +4,19 @@ import { createServerClient } from "@/lib/supabase/server"
 /**
  * DELETE /api/case/[caseId]/documents/[documentId]
  *
- * Cascading document deletion using the service-role key (bypasses RLS).
- * Order matters — delete child rows before the parent document to avoid FK violations:
- *   1. evidence_links  (references document_id + evidence_document_id)
- *   2. extractions     (references document_id)
- *   3. kg_edges        (references source_node_id/target_node_id in kg_nodes)
- *   4. kg_nodes        (references document_id)
- *   5. sections        (references document_id)
- *   6. documents       (the row itself)
+ * Full dependency tree (from FK query) — delete leaf-first by document_id:
+ *
+ *   evidence_links     → sections, counts, allegations, documents
+ *   section_embeddings → sections, documents
+ *   extractions        → sections, documents
+ *   kg_edges           → kg_nodes, sections
+ *   kg_nodes           → sections, documents, kg_nodes(self)
+ *   legal_elements     → counts, sections, documents
+ *   allegations        → counts, claims, sections, documents
+ *   counts             → claims, sections, documents
+ *   claims             → sections, documents
+ *   sections           → sections(self), documents
+ *   documents
  */
 export async function DELETE(
   _request: NextRequest,
@@ -20,45 +25,58 @@ export async function DELETE(
   const { caseId, documentId } = await params
   const supabase = createServerClient()
 
-  // 1. Fetch all kg_node ids for this document (needed to delete their edges)
+  // Fetch kg_node ids (needed to delete edges by node id)
   const { data: nodes } = await supabase
     .from("kg_nodes")
     .select("id")
     .eq("document_id", documentId)
-
   const nodeIds = (nodes ?? []).map((n) => n.id)
 
-  // 2. Delete evidence_links referencing this document (either side)
+  // 1. evidence_links
   await supabase
     .from("evidence_links")
     .delete()
     .or(`document_id.eq.${documentId},evidence_document_id.eq.${documentId}`)
 
-  // 3. Delete extractions
+  // 2. section_embeddings
+  await supabase.from("section_embeddings").delete().eq("document_id", documentId)
+
+  // 3. extractions
   await supabase.from("extractions").delete().eq("document_id", documentId)
 
-  // 4. Delete kg_edges touching any node from this document
+  // 4. kg_edges
   if (nodeIds.length > 0) {
     await supabase.from("kg_edges").delete().in("source_node_id", nodeIds)
     await supabase.from("kg_edges").delete().in("target_node_id", nodeIds)
   }
-  // Also delete edges with source_document_id
   await supabase.from("kg_edges").delete().eq("source_document_id", documentId)
 
-  // 5. Delete kg_nodes
+  // 5. kg_nodes
   await supabase.from("kg_nodes").delete().eq("document_id", documentId)
 
-  // 6. Delete sections
+  // 6. legal_elements
+  await supabase.from("legal_elements").delete().eq("document_id", documentId)
+
+  // 7. allegations
+  await supabase.from("allegations").delete().eq("document_id", documentId)
+
+  // 8. counts
+  await supabase.from("counts").delete().eq("document_id", documentId)
+
+  // 9. claims
+  await supabase.from("claims").delete().eq("document_id", documentId)
+
+  // 10. sections
   await supabase.from("sections").delete().eq("document_id", documentId)
 
-  // 7. Null out primary_document_id on the case if it points here
+  // 11. Null out primary_document_id on the case if it points here
   await supabase
     .from("cases")
     .update({ primary_document_id: null })
     .eq("id", caseId)
     .eq("primary_document_id", documentId)
 
-  // 8. Finally delete the document itself
+  // 12. Delete the document itself
   const { error } = await supabase
     .from("documents")
     .delete()

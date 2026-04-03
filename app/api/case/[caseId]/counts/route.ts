@@ -23,7 +23,17 @@ export async function GET(
     return NextResponse.json([])
   }
 
-  const countIds = counts.map((c) => c.id as string)
+  // Deduplicate counts — if the same document is uploaded more than once,
+  // claims/counts with identical label+type will appear multiple times.
+  const seenCountKeys = new Set<string>()
+  const uniqueCounts = counts.filter((c) => {
+    const key = `${(c.count_label as string ?? "").toLowerCase().trim()}||${(c.count_type as string ?? "").toLowerCase().trim()}`
+    if (seenCountKeys.has(key)) return false
+    seenCountKeys.add(key)
+    return true
+  })
+
+  const countIds = uniqueCounts.map((c) => c.id as string)
 
   // 2. Fetch all allegations belonging to these counts
   const { data: allegations } = await supabase
@@ -94,7 +104,7 @@ export async function GET(
   }
 
   // 7. Group everything by count
-  const result: CountWithEvidence[] = counts.map((count) => {
+  const result: CountWithEvidence[] = uniqueCounts.map((count) => {
     const countAllegations: Allegation[] = (allegations ?? [])
       .filter((a) => a.count_id === count.id)
       .map((a) => ({

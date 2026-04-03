@@ -3,9 +3,18 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Plus, Trash2 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
 import { NewCaseModal } from "./new-case-modal"
 import type { Case } from "@/lib/types/case"
+import { cn } from "@/lib/utils"
+
+const STAGE_OPTIONS: Array<{ value: NonNullable<Case["case_stage"]>; label: string }> = [
+  { value: "filing",    label: "Filing" },
+  { value: "discovery", label: "Discovery" },
+  { value: "motions",   label: "Motions" },
+  { value: "trial",     label: "Trial" },
+  { value: "appeal",    label: "Appeal" },
+  { value: "closed",    label: "Closed" },
+]
 
 // ── Display helpers ───────────────────────────────────────────────────────────
 
@@ -55,29 +64,40 @@ export function RecentCases() {
   const [deleteInput, setDeleteInput]   = useState("")
   const [isDeleting, setIsDeleting]     = useState(false)
   const deleteInputRef = useRef<HTMLInputElement>(null)
+  const [openStageId, setOpenStageId]   = useState<string | null>(null)
+  const [hoverStageId, setHoverStageId] = useState<string | null>(null)
+  const stageDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close stage dropdown on outside click
+  useEffect(() => {
+    if (!openStageId) return
+    function handler(e: MouseEvent) {
+      if (stageDropdownRef.current && !stageDropdownRef.current.contains(e.target as Node)) {
+        setOpenStageId(null)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [openStageId])
+
+  async function updateCaseStage(caseId: string, newStage: Case["case_stage"]) {
+    setOpenStageId(null)
+    const res = await fetch(`/api/case/${caseId}/metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_stage: newStage }),
+    })
+    if (res.ok) {
+      setCases(prev => prev.map(c => c.id === caseId ? { ...c, case_stage: newStage } : c))
+    }
+  }
 
   async function load() {
-    const supabase = createClient()
-    const { data: caseRows } = await supabase
-      .from("cases")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(6)
-
-    if (!caseRows?.length) { setIsLoading(false); return }
-    setCases(caseRows as Case[])
-
-    const ids = caseRows.map((c) => c.id)
-    const { data: docs } = await supabase
-      .from("documents")
-      .select("case_id")
-      .in("case_id", ids)
-
-    const counts: Record<string, number> = {}
-    for (const d of docs ?? []) {
-      counts[d.case_id] = (counts[d.case_id] ?? 0) + 1
-    }
-    setDocCounts(counts)
+    const res = await fetch("/api/cases")
+    if (!res.ok) { setIsLoading(false); return }
+    const { cases: caseRows, docCounts: counts } = await res.json()
+    setCases(((caseRows ?? []) as Case[]).slice(0, 6))
+    setDocCounts(counts ?? {})
     setIsLoading(false)
   }
 
@@ -99,9 +119,10 @@ export function RecentCases() {
   async function confirmDelete() {
     if (!deleteTarget || deleteInput !== deleteTarget.case_name) return
     setIsDeleting(true)
-    const supabase = createClient()
-    await supabase.from("cases").delete().eq("id", deleteTarget.id)
-    setCases((prev) => prev.filter((c) => c.id !== deleteTarget.id))
+    const res = await fetch(`/api/case/${deleteTarget.id}`, { method: "DELETE" })
+    if (res.ok) {
+      setCases((prev) => prev.filter((c) => c.id !== deleteTarget.id))
+    }
     setIsDeleting(false)
     closeDeleteModal()
   }
@@ -178,11 +199,62 @@ export function RecentCases() {
 
                 {/* Stage + role badges */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {c.case_stage && (
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize ${stageCls}`}>
-                      {c.case_stage}
-                    </span>
-                  )}
+                  {/* Editable stage badge */}
+                  <div
+                    className="relative"
+                    ref={openStageId === c.id ? stageDropdownRef : undefined}
+                  >
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoverStageId(c.id)}
+                      onMouseLeave={() => setHoverStageId(null)}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setOpenStageId(prev => prev === c.id ? null : c.id)
+                      }}
+                      className={cn(
+                        "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
+                        c.case_stage
+                          ? `${stageCls} hover:opacity-80`
+                          : "bg-muted/40 text-muted-foreground hover:bg-muted/60"
+                      )}
+                    >
+                      {hoverStageId === c.id && openStageId !== c.id ? (
+                        <span>Edit</span>
+                      ) : (
+                        <span>{c.case_stage ?? "Stage"}</span>
+                      )}
+                      <svg className="h-2.5 w-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </button>
+
+                    {openStageId === c.id && (
+                      <div className="absolute left-0 top-full mt-1 z-50 w-32 rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm shadow-lg py-1">
+                        {STAGE_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              updateCaseStage(c.id, opt.value)
+                            }}
+                            className={cn(
+                              "w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
+                              c.case_stage === opt.value
+                                ? "text-foreground font-medium"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {c.party_role && (
                     <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                       {ROLE_LABEL[c.party_role] ?? c.party_role}

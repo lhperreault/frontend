@@ -169,7 +169,7 @@ function DocRow({
 // ─── AllDocumentsView ─────────────────────────────────────────────────────────
 
 export function AllDocumentsView({ caseId }: { caseId: string }) {
-  const { navigateToDocument } = useWorkspace()
+  const { navigateToDocument, activeDocumentId, clearActiveDocument, entityDocFilter, setEntityDocFilter } = useWorkspace()
   const { entities } = useEntities(caseId)
 
   const [documents, setDocuments] = useState<Document[]>([])
@@ -196,23 +196,35 @@ export function AllDocumentsView({ caseId }: { caseId: string }) {
     [entities]
   )
 
+  // Collect all document IDs that mention the filtered entity
+  const entityFilterDocIds = useMemo(() => {
+    if (!entityDocFilter) return null
+    const node = entities.find(e => e.id === entityDocFilter.id)
+    if (!node) return null
+    const ids = new Set<string>([node.document_id])
+    for (const inst of node.instances ?? []) ids.add(inst.document_id)
+    return ids
+  }, [entityDocFilter, entities])
+
   const filtered = useMemo(() => {
     return documents.filter(d => {
       if (classFilter && d.document_type !== classFilter) return false
-      // Party filter: only top-level filtering (we don't have per-doc party data directly,
-      // but we use the party name as a substring match against file_name / document_type)
       if (partyFilter && !(
         d.file_name.toLowerCase().includes(partyFilter.toLowerCase()) ||
         (d.document_type ?? "").toLowerCase().includes(partyFilter.toLowerCase())
       )) return false
+      if (entityFilterDocIds && !entityFilterDocIds.has(d.id)) return false
       return true
     })
-  }, [documents, classFilter, partyFilter])
+  }, [documents, classFilter, partyFilter, entityFilterDocIds])
 
   const { topLevel, children } = groupDocuments(filtered)
 
   function handleDeleted(id: string) {
     setDocuments(prev => prev.filter(d => d.id !== id))
+    if (activeDocumentId === id) {
+      clearActiveDocument()
+    }
   }
 
   return (
@@ -266,6 +278,22 @@ export function AllDocumentsView({ caseId }: { caseId: string }) {
         )}
       </div>
 
+      {/* Entity doc filter banner */}
+      {entityDocFilter && (
+        <div className="shrink-0 flex items-center justify-between border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5">
+          <span className="text-[10px] text-amber-400">
+            Showing documents with: <span className="font-medium">{entityDocFilter.label}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setEntityDocFilter(null)}
+            className="text-[10px] text-amber-400/70 hover:text-amber-400"
+          >
+            Clear ✕
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
@@ -307,7 +335,7 @@ export function AllDocumentsView({ caseId }: { caseId: string }) {
       <div className="shrink-0 border-t border-border/20 px-3 py-1.5">
         <p className="text-[10px] text-muted-foreground">
           {filtered.length} document{filtered.length !== 1 ? "s" : ""}
-          {(classFilter || partyFilter) ? " (filtered)" : ""}
+          {(classFilter || partyFilter || entityDocFilter) ? " (filtered)" : ""}
         </p>
       </div>
     </div>

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 interface DocumentNavProps {
   sections: Section[]
   activeSectionId?: string
+  /** Section IDs currently cited in the last AI response — shown with green glow */
+  highlightedSectionIds?: string[]
   onSelect: (sectionId: string, anchorId?: string | null) => void
   onToggle?: () => void
 }
@@ -36,15 +38,18 @@ function buildTree(sections: Section[]): SectionNode[] {
 function NavItem({
   node,
   activeSectionId,
+  highlightedIds,
   onSelect,
   depth,
 }: {
   node: SectionNode
   activeSectionId?: string
+  highlightedIds?: Set<string>
   onSelect: (sectionId: string, anchorId?: string | null) => void
   depth: number
 }) {
   const isActive = activeSectionId === node.id
+  const isHighlighted = highlightedIds?.has(node.id) ?? false
 
   return (
     <>
@@ -53,15 +58,19 @@ function NavItem({
           type="button"
           onClick={() => onSelect(node.id, node.anchor_id)}
           className={cn(
-            "w-full text-left py-0.5 pr-2 rounded text-[11px] leading-tight transition-colors flex items-center",
+            "w-full text-left py-0.5 pr-2 rounded text-[11px] leading-tight transition-all flex items-center gap-1.5",
             depth === 0 ? "font-medium text-slate-700" : "text-slate-500",
             isActive
               ? "font-semibold text-slate-900"
               : "hover:bg-slate-100 hover:text-slate-800",
+            isHighlighted && !isActive && "bg-emerald-50 text-emerald-700 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.4)]",
           )}
           style={{ paddingLeft: `${depth * 8 + 8}px` }}
           title={node.section_title ?? "Untitled"}
         >
+          {isHighlighted && (
+            <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.8)]" />
+          )}
           <span className="block max-w-[180px] truncate">{node.section_title ?? "Untitled"}</span>
         </button>
       </li>
@@ -70,6 +79,7 @@ function NavItem({
           key={child.id}
           node={child}
           activeSectionId={activeSectionId}
+          highlightedIds={highlightedIds}
           onSelect={onSelect}
           depth={depth + 1}
         />
@@ -85,10 +95,15 @@ function NavItem({
 export function DocumentNav({
   sections,
   activeSectionId,
+  highlightedSectionIds,
   onSelect,
   onToggle,
 }: DocumentNavProps) {
   const tree = useMemo(() => buildTree(sections), [sections])
+  const highlightedIds = useMemo(
+    () => new Set(highlightedSectionIds ?? []),
+    [highlightedSectionIds],
+  )
 
   return (
     <nav className="flex h-full w-48 max-w-[192px] flex-col bg-slate-50 overflow-hidden">
@@ -117,6 +132,7 @@ export function DocumentNav({
               key={node.id}
               node={node}
               activeSectionId={activeSectionId}
+              highlightedIds={highlightedIds}
               onSelect={onSelect}
               depth={0}
             />

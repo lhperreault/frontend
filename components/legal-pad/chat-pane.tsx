@@ -1,31 +1,42 @@
 "use client"
 
 import { useRef, useEffect, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { UserMessage, AssistantMessage } from "./chat-message"
 import type { ChatState } from "@/hooks/use-chat-messages"
+import type { KGNodeGrouped } from "@/lib/types/kg"
 import { cn } from "@/lib/utils"
+
+// ── Thinking indicator ────────────────────────────────────────────────────────
 
 const THINKING_MESSAGES = [
   "Searching documents...",
   "Reading relevant sections...",
   "Checking the knowledge graph...",
-  "Analyzing evidence chains...",
+  "Analysing evidence chains...",
+  "Cross-referencing claims...",
+  "Reviewing extractions...",
   "Preparing response...",
 ]
 
 function ThinkingIndicator() {
   const [idx, setIdx] = useState(0)
+  const [visible, setVisible] = useState(true)
 
   useEffect(() => {
-    const id = setInterval(
-      () => setIdx((i) => (i + 1) % THINKING_MESSAGES.length),
-      2500,
-    )
+    const id = setInterval(() => {
+      setVisible(false)
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % THINKING_MESSAGES.length)
+        setVisible(true)
+      }, 200)
+    }, 2200)
     return () => clearInterval(id)
   }, [])
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
+      {/* Dots bubble */}
       <div className="flex max-w-[80%] items-center gap-1.5 rounded-2xl rounded-tl-sm bg-muted px-3 py-2.5">
         {[0, 1, 2].map((i) => (
           <span
@@ -35,7 +46,18 @@ function ThinkingIndicator() {
           />
         ))}
       </div>
-      <p className="pl-1 text-xs text-slate-400">{THINKING_MESSAGES[idx]}</p>
+      {/* Cycling verb label */}
+      <div className="flex items-center gap-1.5 pl-1">
+        <Loader2 className="h-3 w-3 animate-spin text-primary/60" />
+        <p
+          className={cn(
+            "text-xs text-muted-foreground transition-opacity duration-200",
+            visible ? "opacity-100" : "opacity-0",
+          )}
+        >
+          {THINKING_MESSAGES[idx]}
+        </p>
+      </div>
     </div>
   )
 }
@@ -52,9 +74,12 @@ function SummaryLoadingIndicator() {
   )
 }
 
+// ── ChatPane ──────────────────────────────────────────────────────────────────
+
 interface ChatPaneProps extends ChatState {
-  /** When true, renders in expanded Sheet mode (wider input, more breathing room) */
   expanded?: boolean
+  readOnly?: boolean
+  entities?: KGNodeGrouped[]
 }
 
 export function ChatPane({
@@ -65,12 +90,21 @@ export function ChatPane({
   isSummaryLoading,
   handleSubmit,
   expanded,
+  readOnly,
+  entities = [],
 }: ChatPaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isLoading])
+
+  // Index of the last non-summary assistant message (gets entity highlights + TOC glow)
+  const latestAssistantIdx = messages.reduceRight((found, msg, i) => {
+    if (found !== -1) return found
+    if (msg.type === "assistant" && !msg.isSummary) return i
+    return -1
+  }, -1)
 
   return (
     <div className="flex h-full flex-col">
@@ -92,6 +126,8 @@ export function ChatPane({
               key={i}
               response={msg.response}
               isSummary={msg.isSummary}
+              entities={msg.isSummary ? [] : entities}
+              isLatest={i === latestAssistantIdx}
             />
           ),
         )}
@@ -100,10 +136,15 @@ export function ChatPane({
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — hidden in read-only mode */}
+      {readOnly && (
+        <div className={cn("border-t border-border/30 py-2 text-center", expanded ? "px-4" : "px-3")}>
+          <span className="text-[10px] text-muted-foreground/50 italic">Read-only history</span>
+        </div>
+      )}
       <form
         onSubmit={handleSubmit}
-        className={cn("border-t border-border/30", expanded ? "p-4" : "p-3")}
+        className={cn("border-t border-border/30", expanded ? "p-4" : "p-3", readOnly && "hidden")}
       >
         <div className="flex gap-2">
           <input

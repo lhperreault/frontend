@@ -48,7 +48,13 @@ const PHASE_DOT_CLS: Record<PhaseState["status"], string> = {
   error:   "bg-red-400",
 }
 
-export function OmniDropZone() {
+export function OmniDropZone({
+  initialCaseId,
+  onUploadComplete,
+}: {
+  initialCaseId?: string
+  onUploadComplete?: () => void
+} = {}) {
   const inputRef  = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -63,9 +69,18 @@ export function OmniDropZone() {
   const [cases, setCases] = useState<Case[]>([])
   const [casesLoading, setCasesLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [duplicateFiles, setDuplicateFiles] = useState<string[]>([])
 
   // Upload progress state
   const [uploads, setUploads] = useState<UploadItem[]>([])
+
+  // Pre-select case when initialCaseId is provided
+  useEffect(() => {
+    if (initialCaseId) {
+      setMode("existing")
+      setSelectedCaseId(initialCaseId)
+    }
+  }, [initialCaseId])
 
   // Fetch existing cases when dialog opens
   useEffect(() => {
@@ -98,6 +113,7 @@ export function OmniDropZone() {
     if (!files.length) return
     setPendingFiles(files)
     setNewCaseName("")
+    setDuplicateFiles([])
     setDialogOpen(true)
   }, [])
 
@@ -116,6 +132,21 @@ export function OmniDropZone() {
     setIsSubmitting(true)
     try {
       let caseId = selectedCaseId
+
+      // Check for duplicate documents in existing case (only on first attempt)
+      if (mode === "existing" && selectedCaseId && duplicateFiles.length === 0) {
+        const { data: existingDocs } = await createClient()
+          .from("documents")
+          .select("file_name")
+          .eq("case_id", selectedCaseId)
+        const existingNames = new Set((existingDocs ?? []).map((d) => d.file_name as string))
+        const dupes = pendingFiles.filter((f) => existingNames.has(f.name)).map((f) => f.name)
+        if (dupes.length > 0) {
+          setDuplicateFiles(dupes)
+          setIsSubmitting(false)
+          return
+        }
+      }
 
       // Create new case if needed
       if (mode === "new") {
@@ -180,6 +211,7 @@ export function OmniDropZone() {
           )
         }
       }
+      onUploadComplete?.()
     } catch (err) {
       console.error("[OmniDropZone] confirm error:", err)
     } finally {
@@ -296,7 +328,7 @@ export function OmniDropZone() {
             </div>
 
             {mode === "existing" && cases.length > 0 && (
-              <Select value={selectedCaseId} onValueChange={setSelectedCaseId}>
+              <Select value={selectedCaseId} onValueChange={(v) => { setSelectedCaseId(v); setDuplicateFiles([]) }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a case…" />
                 </SelectTrigger>
@@ -350,6 +382,14 @@ export function OmniDropZone() {
             )}
           </div>
 
+          {duplicateFiles.length > 0 && (
+            <p className="text-sm text-amber-400 px-1">
+              {duplicateFiles.length === 1
+                ? `"${duplicateFiles[0]}" is already in this case. Are you sure you want to upload it? This is a copy.`
+                : `${duplicateFiles.length} files are already in this case. Are you sure you want to upload them? These are copies.`}
+            </p>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
@@ -358,7 +398,7 @@ export function OmniDropZone() {
               onClick={handleConfirm}
               disabled={isSubmitting || (mode === "existing" && !selectedCaseId)}
             >
-              {isSubmitting ? "Processing…" : "Upload"}
+              {isSubmitting ? "Processing…" : duplicateFiles.length > 0 ? "Upload anyway" : "Upload"}
             </Button>
           </DialogFooter>
         </DialogContent>

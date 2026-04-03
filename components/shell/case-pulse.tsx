@@ -1,7 +1,7 @@
 "use client"
 
 import { useParams } from "next/navigation"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import type { Case } from "@/lib/types/case"
 import { cn } from "@/lib/utils"
@@ -14,10 +14,51 @@ const STATUS_DOT: Record<string, string> = {
   idle:    "bg-muted-foreground",
 }
 
+const STAGE_OPTIONS: Array<{ value: NonNullable<Case["case_stage"]>; label: string }> = [
+  { value: "filing",    label: "Filing" },
+  { value: "discovery", label: "Discovery" },
+  { value: "motions",   label: "Motions" },
+  { value: "trial",     label: "Trial" },
+  { value: "appeal",    label: "Appeal" },
+  { value: "closed",    label: "Closed" },
+]
+
+// Priority order — higher index = later in lifecycle
+const STAGE_ORDER: Record<string, number> = {
+  filing: 0, discovery: 1, motions: 2, trial: 3, appeal: 4, closed: 5,
+}
+
+/**
+ * Infer the furthest litigation stage from a list of document types.
+ * Priority: appeal > trial > motions > discovery > filing
+ */
+function inferStageFromDocs(docTypes: (string | null)[]): Case["case_stage"] | null {
+  const types = docTypes.filter(Boolean) as string[]
+  if (types.some(t => t.includes("Appeal Brief") || t.includes("Notice of Appeal"))) return "appeal"
+  if (types.some(t =>
+    t.startsWith("Court - Trial") ||
+    t.startsWith("Court - Pretrial") ||
+    t.startsWith("Court - Jury")
+  )) return "trial"
+  if (types.some(t =>
+    t.startsWith("Pleading - Motion") ||
+    t.startsWith("Pleading - Brief") ||
+    t.startsWith("Pleading - Opposition") ||
+    t.startsWith("Pleading - Reply Brief")
+  )) return "motions"
+  if (types.some(t => t.startsWith("Discovery"))) return "discovery"
+  if (types.some(t => t.startsWith("Pleading"))) return "filing"
+  return null
+}
+
 /**
  * Case Pulse — thin glassmorphism top bar.
  * Reads caseId from the URL directly (via useParams) so it works even though
  * it renders outside the CaseProvider (which only wraps at case/[caseId]/**).
+ *
+ * Auto-detects litigation stage from uploaded documents and advances it
+ * forward automatically. The stage badge is also manually editable via a
+ * hover → click → dropdown flow.
  */
 export function CasePulse() {
   const params = useParams()
@@ -25,16 +66,71 @@ export function CasePulse() {
 
   const [caseData, setCaseData] = useState<Case | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [stageOpen, setStageOpen] = useState(false)
+  const [stageHover, setStageHover] = useState(false)
+  const stageRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!caseId) return
     setIsLoading(true)
-    fetch(`/api/case/${caseId}/metadata`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: Case | null) => { if (data) setCaseData(data) })
+
+    Promise.all([
+      fetch(`/api/case/${caseId}/metadata`).then(r => r.ok ? r.json() as Promise<Case> : null),
+      fetch(`/api/case/${caseId}/documents`).then(r => r.ok ? r.json() as Promise<Array<{ document_type: string | null }>> : []),
+    ])
+      .then(async ([caseRow, docs]) => {
+        if (!caseRow) return
+
+        const inferredStage = inferStageFromDocs((docs ?? []).map(d => d.document_type))
+
+        // Auto-advance stage only forward in the lifecycle — never overwrite a
+        // manually set "later" stage or a "closed" case.
+        if (inferredStage) {
+          const storedOrder   = STAGE_ORDER[caseRow.case_stage ?? ""] ?? -1
+          const inferredOrder = STAGE_ORDER[inferredStage] ?? -1
+          if (inferredOrder > storedOrder) {
+            const patchRes = await fetch(`/api/case/${caseId}/metadata`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ case_stage: inferredStage }),
+            })
+            if (patchRes.ok) {
+              setCaseData({ ...caseRow, case_stage: inferredStage })
+              return
+            }
+          }
+        }
+
+        setCaseData(caseRow)
+      })
       .catch(() => {})
       .finally(() => setIsLoading(false))
   }, [caseId])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!stageOpen) return
+    function handler(e: MouseEvent) {
+      if (stageRef.current && !stageRef.current.contains(e.target as Node)) {
+        setStageOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [stageOpen])
+
+  async function updateStage(newStage: Case["case_stage"]) {
+    if (!caseId || !caseData) return
+    setStageOpen(false)
+    const res = await fetch(`/api/case/${caseId}/metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_stage: newStage }),
+    })
+    if (res.ok) {
+      setCaseData(prev => prev ? { ...prev, case_stage: newStage } : prev)
+    }
+  }
 
   const caseLabel = !caseId
     ? "No case open"
@@ -42,9 +138,18 @@ export function CasePulse() {
     ? "Loading…"
     : (caseData?.case_name ?? "No case open")
 
-  const caseType = caseData?.case_type ?? null
-  const deadline = caseData?.next_deadline ?? null
-  const status   = caseData?.pipeline_status ?? "idle"
+  const caseType  = caseData?.case_type ?? null
+  const caseStage = caseData?.case_stage ?? null
+  const partyRole = caseData?.party_role ?? null
+  const deadline  = caseData?.next_deadline ?? null
+  const status    = caseData?.pipeline_status ?? "idle"
+
+  const ROLE_LABEL: Record<string, string> = {
+    plaintiff: "Plaintiff",
+    defendant: "Defendant",
+    appellant: "Appellant",
+    appellee:  "Appellee",
+  }
 
   return (
     <header className="glass border-b border-border/50 h-11 flex items-center px-4 gap-4 shrink-0 z-40">
@@ -59,9 +164,62 @@ export function CasePulse() {
         </svg>
       </Link>
 
-      {/* Left: case name */}
+      {/* Left: case name + editable stage badge + party role */}
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-sm font-medium truncate">{caseLabel}</span>
+
+        {/* Editable stage badge — only render when inside a case */}
+        {caseId && (
+          <div className="relative shrink-0" ref={stageRef}>
+            <button
+              type="button"
+              onMouseEnter={() => setStageHover(true)}
+              onMouseLeave={() => setStageHover(false)}
+              onClick={() => setStageOpen(o => !o)}
+              className={cn(
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
+                caseStage
+                  ? "bg-purple-500/15 text-purple-400 hover:bg-purple-500/25"
+                  : "bg-muted/40 text-muted-foreground hover:bg-muted/60"
+              )}
+            >
+              {stageHover && !stageOpen ? (
+                <span>Edit stage</span>
+              ) : (
+                <span>{caseStage ?? "Set stage"}</span>
+              )}
+              <svg className="h-2.5 w-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+
+            {stageOpen && (
+              <div className="absolute left-0 top-full mt-1 z-50 w-32 rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm shadow-lg py-1">
+                {STAGE_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => updateStage(opt.value)}
+                    className={cn(
+                      "w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
+                      caseStage === opt.value
+                        ? "text-purple-400 font-medium"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {partyRole && (
+          <span className="shrink-0 rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium capitalize text-purple-300">
+            {ROLE_LABEL[partyRole] ?? partyRole}
+          </span>
+        )}
       </div>
 
       {/* Center: case type */}
