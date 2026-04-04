@@ -15,17 +15,59 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Case } from "@/lib/types/case"
 
+// ── Types ──────────────────────────────────────────────────────────────────────
+
 interface PhaseState {
   label: string
   status: "pending" | "running" | "done" | "error"
 }
 
-interface UploadItem {
-  file: File
-  status: "queued" | "uploading" | "done" | "error"
-  error?: string
-  phases: PhaseState[]
+interface StepRow {
+  step_name:     string
+  display_label: string
+  status:        "pending" | "running" | "done" | "error"
+  error_message?: string | null
 }
+
+interface UploadItem {
+  file:        File
+  status:      "queued" | "uploading" | "done" | "error"
+  error?:      string
+  phases:      PhaseState[]
+  documentId?: string
+  steps:       StepRow[]
+  expanded:    boolean
+}
+
+// Canonical display order for checklist steps
+const STEP_ORDER: string[] = [
+  "text_extraction",
+  "doc_classification",
+  "toc_split",
+  "saved_to_db",
+  "embeddings",
+  "section_refine",
+  "ast_tree",
+  "semantic_labeling",
+  "entity_extraction",
+  "legal_structure",
+  "kg_build",
+  "initial_summary",
+  "enriched_summary",
+]
+
+function sortSteps(steps: StepRow[]): StepRow[] {
+  return [...steps].sort((a, b) => {
+    const ai = STEP_ORDER.indexOf(a.step_name)
+    const bi = STEP_ORDER.indexOf(b.step_name)
+    if (ai === -1 && bi === -1) return 0
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+}
+
+// ── Style maps ─────────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<UploadItem["status"], { label: string; cls: string }> = {
   queued:    { label: "Queued",      cls: "text-muted-foreground" },
@@ -47,6 +89,8 @@ const PHASE_DOT_CLS: Record<PhaseState["status"], string> = {
   done:    "bg-emerald-400",
   error:   "bg-red-400",
 }
+
+// ── Component ──────────────────────────────────────────────────────────────────
 
 export function OmniDropZone({
   initialCaseId,
@@ -73,6 +117,9 @@ export function OmniDropZone({
 
   // Upload progress state
   const [uploads, setUploads] = useState<UploadItem[]>([])
+
+  // Track active Realtime channel names so we can clean them up on unmount
+  const channelNamesRef = useRef<string[]>([])
 
   // Pre-select case when initialCaseId is provided
   useEffect(() => {
@@ -108,6 +155,54 @@ export function OmniDropZone({
       })
       .finally(() => setCasesLoading(false))
   }, [dialogOpen])
+
+  // Unsubscribe all Realtime channels on unmount
+  useEffect(() => {
+    const supabase = createClient()
+    return () => {
+      for (const name of channelNamesRef.current) {
+        supabase.channel(name).unsubscribe()
+      }
+    }
+  }, [])
+
+  // Subscribe to document_processing_steps for a given documentId
+  const subscribeToSteps = useCallback((documentId: string, file: File) => {
+    const supabase    = createClient()
+    const channelName = `steps-${documentId}`
+    channelNamesRef.current.push(channelName)
+
+    supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event:  "*",
+          schema: "public",
+          table:  "document_processing_steps",
+          filter: `document_id=eq.${documentId}`,
+        },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as StepRow | undefined
+          if (!row?.step_name) return
+
+          setUploads((prev) =>
+            prev.map((u) => {
+              if (u.file !== file) return u
+              const existing = u.steps.findIndex((s) => s.step_name === row.step_name)
+              let next: StepRow[]
+              if (existing >= 0) {
+                next = u.steps.map((s, i) => (i === existing ? { ...s, ...row } : s))
+              } else {
+                next = [...u.steps, row]
+              }
+              return { ...u, steps: sortSteps(next) }
+            }),
+          )
+        },
+      )
+      .subscribe()
+  }, [])
 
   const openDialog = useCallback((files: File[]) => {
     if (!files.length) return
@@ -167,15 +262,16 @@ export function OmniDropZone({
       setDialogOpen(false)
 
       const PHASES: PhaseState[] = [
-        { label: "Extracting & classifying",           status: "pending" },
-        { label: "Building structure & extracting entities", status: "pending" },
+        { label: "Extracting & classifying", status: "pending" },
       ]
 
       // Init upload items
       setUploads(pendingFiles.map((file) => ({
         file,
-        status: "queued",
-        phases: PHASES.map((p) => ({ ...p })),
+        status:   "queued",
+        phases:   PHASES.map((p) => ({ ...p })),
+        steps:    [],
+        expanded: false,
       })))
 
       // Upload files sequentially
@@ -184,7 +280,7 @@ export function OmniDropZone({
           prev.map((u) => (u.file === file ? { ...u, status: "uploading" } : u)),
         )
         try {
-          await uploadDocument(caseId, file, (event: PipelineEvent) => {
+          const { document_id: documentId } = await uploadDocument(caseId, file, (event: PipelineEvent) => {
             if (event.phase != null && event.status) {
               const idx = event.phase - 1
               setUploads((prev) =>
@@ -198,9 +294,22 @@ export function OmniDropZone({
               )
             }
           })
-          setUploads((prev) =>
-            prev.map((u) => (u.file === file ? { ...u, status: "done" } : u)),
-          )
+
+          // SSE done — store documentId and subscribe to live step updates
+          if (documentId) {
+            setUploads((prev) =>
+              prev.map((u) =>
+                u.file === file
+                  ? { ...u, status: "done", documentId, expanded: true }
+                  : u,
+              ),
+            )
+            subscribeToSteps(documentId, file)
+          } else {
+            setUploads((prev) =>
+              prev.map((u) => (u.file === file ? { ...u, status: "done" } : u)),
+            )
+          }
         } catch (err) {
           setUploads((prev) =>
             prev.map((u) =>
@@ -257,13 +366,36 @@ export function OmniDropZone({
         <ul className="space-y-2">
           {uploads.map((u, i) => {
             const { label, cls } = STATUS_LABEL[u.status]
+            const allDone = u.steps.length > 0 && u.steps.every((s) => s.status === "done")
+            const hasRunning = u.steps.some((s) => s.status === "running")
+
             return (
               <li key={i} className="glass rounded-lg px-3 py-2 text-xs space-y-2">
-                <div className="flex items-center justify-between">
+                {/* Header row — click to expand/collapse checklist */}
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 text-left"
+                  onClick={() =>
+                    setUploads((prev) =>
+                      prev.map((item, idx) =>
+                        idx === i ? { ...item, expanded: !item.expanded } : item,
+                      ),
+                    )
+                  }
+                >
                   <span className="truncate text-foreground/80">{u.file.name}</span>
-                  <span className={cls}>{label}</span>
-                </div>
-                {(u.status === "uploading" || u.status === "done") && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className={cls}>{label}</span>
+                    {u.steps.length > 0 && (
+                      <span className="text-muted-foreground">
+                        {u.expanded ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </div>
+                </button>
+
+                {/* SSE phase indicator (shown while Phase 1 is in progress) */}
+                {(u.status === "uploading") && (
                   <ul className="space-y-1 pl-1">
                     {u.phases.map((phase, pi) => (
                       <li key={pi} className="flex items-center gap-2">
@@ -275,6 +407,58 @@ export function OmniDropZone({
                     ))}
                   </ul>
                 )}
+
+                {/* Expandable Realtime checklist */}
+                {u.expanded && u.steps.length > 0 && (
+                  <ul className="space-y-1 border-t border-border/30 pt-2 pl-1">
+                    {sortSteps(u.steps).map((step) => (
+                      <li key={step.step_name} className="flex items-start gap-2">
+                        <span
+                          className={cn(
+                            "mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                            step.status === "done"    ? "bg-emerald-400"
+                            : step.status === "running" ? "bg-amber-400 animate-pulse"
+                            : step.status === "error"   ? "bg-red-400"
+                            : "bg-muted-foreground/30",
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <span
+                            className={cn(
+                              "truncate",
+                              step.status === "done"    ? "text-emerald-400"
+                              : step.status === "running" ? "text-amber-400"
+                              : step.status === "error"   ? "text-red-400"
+                              : "text-muted-foreground",
+                            )}
+                          >
+                            {step.display_label}
+                          </span>
+                          {step.status === "error" && step.error_message && (
+                            <p className="text-red-400/80 text-[10px] mt-0.5 truncate">
+                              {step.error_message}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+
+                    {/* Summary line at the bottom */}
+                    {(hasRunning || !allDone) && (
+                      <li className="pt-1 text-[10px] text-muted-foreground">
+                        {hasRunning
+                          ? "Enrichment running in background…"
+                          : "Waiting for background processing…"}
+                      </li>
+                    )}
+                    {allDone && (
+                      <li className="pt-1 text-[10px] text-emerald-400/70">
+                        All processing complete
+                      </li>
+                    )}
+                  </ul>
+                )}
+
                 {u.status === "error" && (
                   <p className="text-red-400">{u.error}</p>
                 )}
