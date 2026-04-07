@@ -25,5 +25,6 @@ export interface Document {
   total_pages: number | null
   parent_document_id: string | null // FK → documents.id (for exhibit children)
   tagged_xhtml_url: string | null   // Supabase Storage URL for tagged XHTML (HTML docs only)
+  original_file_url: string | null  // Supabase Storage URL for the original source file
   created_at: string
 }

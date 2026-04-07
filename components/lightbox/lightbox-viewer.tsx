@@ -33,6 +33,7 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
   const contentRef = useRef<HTMLDivElement>(null)
   const [activeSectionId, setActiveSectionId] = useState<string | undefined>()
   const [showNav, setShowNav] = useState(true)
+  const [viewMode, setViewMode] = useState<"extracted" | "original">("extracted")
   const { highlightedSectionIds } = useWorkspace()
 
   const { document, sections, extractions, isLoading } = useDocument(documentId)
@@ -42,6 +43,11 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
     ? `/api/case/${caseId}/xhtml?document_id=${documentId}`
     : null
   const { xhtml, isLoading: xhtmlLoading } = useDocumentXhtml(xhtmlProxyUrl)
+
+  const hasOriginal = !!document?.original_file_url
+
+  // Reset to extracted view whenever the displayed document changes
+  useEffect(() => { setViewMode("extracted") }, [documentId])
 
   const loading = isLoading || xhtmlLoading
 
@@ -99,10 +105,49 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
   return (
     <div
       className={cn(
-        "flex h-full overflow-hidden bg-white dark:bg-slate-50 text-slate-800",
+        "flex flex-col h-full overflow-hidden bg-white dark:bg-slate-50 text-slate-800",
         className,
       )}
     >
+      {/* Original / Extracted toggle — only shown when an original file URL exists */}
+      {hasOriginal && (
+        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-slate-200 shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode("extracted")}
+            className={cn(
+              "px-3 py-0.5 rounded text-xs font-medium transition-colors",
+              viewMode === "extracted"
+                ? "bg-slate-800 text-white"
+                : "bg-slate-100 text-slate-500 hover:bg-slate-200",
+            )}
+          >
+            Extracted
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("original")}
+            className={cn(
+              "px-3 py-0.5 rounded text-xs font-medium transition-colors",
+              viewMode === "original"
+                ? "bg-slate-800 text-white"
+                : "bg-slate-100 text-slate-500 hover:bg-slate-200",
+            )}
+          >
+            Original
+          </button>
+        </div>
+      )}
+
+      {/* Original PDF — native browser viewer via iframe */}
+      {hasOriginal && viewMode === "original" ? (
+        <iframe
+          src={document!.original_file_url!}
+          title="Original document"
+          className="flex-1 border-0"
+        />
+      ) : (
+      <div className="flex flex-1 overflow-hidden">
       {/* Collapsible TOC sidebar */}
       {showNav && sortedSections.length > 0 && (
         <div className="w-48 shrink-0 border-r border-slate-200 overflow-hidden">
@@ -214,6 +259,8 @@ export function LightboxViewer({ documentId, caseId, scrollToSectionId, classNam
         {/* Hover-sync scroll handler */}
         <HoverSyncHandler containerRef={contentRef} />
       </div>
+      </div>
+      )}
     </div>
   )
 }

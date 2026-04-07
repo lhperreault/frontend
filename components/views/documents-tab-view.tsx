@@ -130,7 +130,7 @@ function DocRow({
                 <span className="flex items-center gap-1.5">
                   <button type="button" onClick={handleDelete} disabled={deleting}
                     className="text-xs font-medium text-red-500 hover:text-red-400 disabled:opacity-50 transition-colors">
-                    {deleting ? "Deleting…" : "Confirm"}
+                    {deleting ? "Deleting…" : "Confirm delete"}
                   </button>
                   <span className="text-muted-foreground/40">·</span>
                   <button type="button" onClick={() => { setConfirm(false); setDeleteError(null) }}
@@ -145,6 +145,12 @@ function DocRow({
                 </button>
               )}
             </div>
+            {confirm && !deleting && childDocs.length > 0 && (
+                <p className="text-[10px] text-amber-400 mt-0.5">
+                  This will also permanently delete {childDocs.length} attached exhibit{childDocs.length !== 1 ? "s" : ""}:{" "}
+                  {childDocs.map(c => c.file_name).join(", ")}
+                </p>
+              )}
             {deleteError && <p className="text-[10px] text-red-400">{deleteError}</p>}
           </div>
         </td>
@@ -205,7 +211,7 @@ export function DocumentsTabView({ caseId }: { caseId: string }) {
   const { topLevel, children } = groupDocuments(filtered)
 
   function handleDeleted(id: string) {
-    setDocuments(prev => prev.filter(d => d.id !== id))
+    setDocuments(prev => prev.filter(d => d.id !== id && d.parent_document_id !== id))
   }
 
   const EXHIBIT_FILTERS: { value: ExhibitFilter; label: string }[] = [
@@ -248,7 +254,7 @@ export function DocumentsTabView({ caseId }: { caseId: string }) {
           <div className="rounded-xl border border-border/40 bg-muted/10 p-4">
             <OmniDropZone
               initialCaseId={caseId}
-              onUploadComplete={() => { fetchDocuments(); setUploadOpen(false) }}
+              onUploadComplete={fetchDocuments}
             />
           </div>
         )}
