@@ -1,6 +1,10 @@
-import { ActionBoard } from "@/components/action-board/action-board"
+import { CaseBoard } from "@/components/case-board/case-board"
 
-export default async function BoardPage({ params }: { params: Promise<{ caseId: string }> }) {
+export default async function BoardPage({
+  params,
+}: {
+  params: Promise<{ caseId: string }>
+}) {
   const { caseId } = await params
-  return <ActionBoard caseId={caseId} />
+  return <CaseBoard caseId={caseId} />
 }
