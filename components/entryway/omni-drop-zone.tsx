@@ -142,6 +142,7 @@ export function OmniDropZone({
         if (error) {
           console.error("[OmniDropZone] failed to fetch cases:", error)
           setMode("new")
+          setCasesLoading(false)
           return
         }
         console.log("[OmniDropZone] cases fetched:", data?.length ?? 0, data)
@@ -152,8 +153,8 @@ export function OmniDropZone({
         } else {
           setMode("new")
         }
+        setCasesLoading(false)
       })
-      .finally(() => setCasesLoading(false))
   }, [dialogOpen])
 
   // Unsubscribe all Realtime channels on unmount
