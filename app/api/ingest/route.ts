@@ -2,8 +2,8 @@ import { NextRequest } from "next/server"
 
 const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8000"
 
-// Allow long-running SSE connections (phases can take several minutes)
-export const maxDuration = 600
+// Allow long-running SSE connections (capped at Vercel Hobby plan max of 300s)
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData()
