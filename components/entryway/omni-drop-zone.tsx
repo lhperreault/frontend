@@ -117,6 +117,8 @@ export function OmniDropZone({
 
   // Upload progress state
   const [uploads, setUploads] = useState<UploadItem[]>([])
+  const [uploadPriority, setUploadPriority] = useState<string>("soon")
+  const [uploadProcessingMode, setUploadProcessingMode] = useState<string>("balanced")
 
   // Track active Realtime channel names so we can clean them up on unmount
   const channelNamesRef = useRef<string[]>([])
@@ -565,6 +567,37 @@ export function OmniDropZone({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Processing options */}
+          <div className="grid grid-cols-2 gap-3 px-1">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Priority</label>
+              <Select value={uploadPriority} onValueChange={setUploadPriority}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="immediate">Process now</SelectItem>
+                  <SelectItem value="soon">Soon (15-30 min)</SelectItem>
+                  <SelectItem value="overnight">Overnight (best accuracy)</SelectItem>
+                  <SelectItem value="manual">Manual trigger</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Processing mode</label>
+              <Select value={uploadProcessingMode} onValueChange={setUploadProcessingMode}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fast">Fast (quick models)</SelectItem>
+                  <SelectItem value="balanced">Balanced (default)</SelectItem>
+                  <SelectItem value="accuracy">Accuracy (multi-pass)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {duplicateFiles.length > 0 && (

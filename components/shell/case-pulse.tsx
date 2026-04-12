@@ -227,8 +227,10 @@ export function CasePulse() {
         <span className="text-xs text-muted-foreground">{caseType ?? "—"}</span>
       </div>
 
-      {/* Right: deadline + pipeline status */}
+      {/* Right: pending docs + notifications + deadline + pipeline status */}
       <div className="flex items-center gap-3 shrink-0">
+        {caseId && <PendingDocsBadge caseId={caseId} />}
+        <NotificationBell />
         {deadline && <DeadlineCountdown deadline={deadline} />}
         <span
           className={cn("w-2 h-2 rounded-full shrink-0", STATUS_DOT[status] ?? STATUS_DOT.idle)}
@@ -236,6 +238,156 @@ export function CasePulse() {
         />
       </div>
     </header>
+  )
+}
+
+/** Badge showing N pending documents for the current case */
+function PendingDocsBadge({ caseId }: { caseId: string }) {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch(`/api/intake/queue?status=processing&limit=1`)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        setCount(data.total ?? 0)
+      } catch { /* ignore */ }
+    }
+    load()
+
+    // Also check confirmed + pending
+    async function loadAll() {
+      try {
+        const res = await fetch(`/api/intake/queue?limit=1`)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        const active = (data.items ?? []).filter(
+          (i: { status: string }) => !["completed", "cancelled", "failed"].includes(i.status)
+        )
+        setCount(active.length)
+      } catch { /* ignore */ }
+    }
+    loadAll()
+
+    return () => { cancelled = true }
+  }, [caseId])
+
+  if (count === 0) return null
+
+  return (
+    <Link
+      href="/intake"
+      className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 hover:bg-amber-500/25 transition-colors"
+      title={`${count} document${count === 1 ? "" : "s"} pending processing`}
+    >
+      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      {count} pending
+    </Link>
+  )
+}
+
+/** Notification bell with unread count */
+function NotificationBell() {
+  const [unread, setUnread] = useState(0)
+  const [open, setOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Array<{
+    id: string
+    event_type: string
+    payload: { message?: string }
+    created_at: string
+    read: boolean
+  }>>([])
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch("/api/notifications?unread_only=true&limit=10")
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        const items = data.notifications ?? []
+        setNotifications(items)
+        setUnread(items.length)
+      } catch { /* ignore */ }
+    }
+    load()
+    const timer = setInterval(load, 30_000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [open])
+
+  async function markRead(id: string) {
+    await fetch(`/api/notifications/${id}/read`, { method: "PATCH" })
+    setNotifications(prev => prev.filter(n => n.id !== id))
+    setUnread(prev => Math.max(0, prev - 1))
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="relative text-muted-foreground hover:text-foreground transition-colors p-0.5"
+        title="Notifications"
+      >
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+        </svg>
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="px-3 py-2 border-b border-border/30 flex items-center justify-between">
+            <span className="text-xs font-medium">Notifications</span>
+            {unread > 0 && (
+              <span className="text-[10px] text-muted-foreground">{unread} unread</span>
+            )}
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                No new notifications
+              </div>
+            ) : (
+              notifications.map(n => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => markRead(n.id)}
+                  className="w-full px-3 py-2 text-left hover:bg-muted/40 transition-colors border-b border-border/20 last:border-0"
+                >
+                  <p className="text-xs text-foreground line-clamp-2">
+                    {n.payload?.message ?? n.event_type}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {new Date(n.created_at).toLocaleString()}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
